@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "loophole-essentials",
+  "version": "${version}",
+  "name": "Loophole's Essentials",
+  "description": "This is an addon for ClickCrystals that add new PvP modules and more!",
+  "authors": [
+    "LoopholeMC"
+  ],
+  "license": "MIT",
+  "icon": "assets/loophole-essentials/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "client": [
+      "com.loophole.essentials.LoopholeEssentialsAddon"
+    ]
+  },
+  "mixins": [
+    "loophole-essentials.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "minecraft": ">=${minecraft_version}",
+    "java": ">=25",
+    "fabric-api": "*",
+    "clickcrystals": "*"
+  }
+}

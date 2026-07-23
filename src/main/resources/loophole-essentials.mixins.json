@@ -1,0 +1,19 @@
+{
+  "required": false,
+  "package": "com.loophole.essentials.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "mixins": [
+    "MixinCategories",
+    "MixinClickCrystals",
+    "MixinConfig",
+    "MixinModuleFile"
+  ],
+  "client": [
+    "AccessorAbstractContainerScreen",
+    "AccessorKeyMapping",
+    "AccessorMinecraft"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
