@@ -1341,13 +1341,16 @@ public class TriggerBotModule extends LoopholeListenerModule implements Persiste
                 tapDistanceWindow,
                 waitForShieldBreakFollowUpClick,
                 attackDelay,
+                knockbackMisses,
                 knockbackMissChance,
                 knockbackMissDistanceWindow,
                 knockbackMissReduceBackToBackChance,
                 knockbackMissFov,
+                outOfRangeMisses,
                 outOfRangeMissChance,
                 outOfRangeWindow,
                 outOfRangeMissTap,
+                cobwebMisses,
                 cobwebMissChance,
                 cobwebMissTap
         );
