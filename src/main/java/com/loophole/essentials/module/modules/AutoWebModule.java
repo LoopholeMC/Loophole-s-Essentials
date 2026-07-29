@@ -37,6 +37,23 @@ public class AutoWebModule extends LoopholeListenerModule implements PersistentS
             .build()
     );
 
+    public final RangeDoubleSetting startDelay = scGeneral.add(createRangeDoubleSetting()
+            .name("start-delay")
+            .description("Randomized delay after pressing the activation button before the repeating use-delay cycle starts.")
+            .def(0.000, 0.000)
+            .min(0.000)
+            .max(0.500)
+            .decimalPlaces(3)
+            .build()
+    );
+
+    public final ModuleSetting<Boolean> immediateFirstUse = scGeneral.add(createBoolSetting()
+            .name("immediate-first-use")
+            .description("Queue one immediate cobweb placement when a non-Right-Click activation button is first pressed, then wait for the delayed repeat cycle.")
+            .def(true)
+            .build()
+    );
+
     public final RangeDoubleSetting useDelay = scGeneral.add(createRangeDoubleSetting()
             .name("use-delay")
             .description("Randomized delay between queued cobweb placements while the activation button stays held and a block is targeted.")
@@ -167,11 +184,11 @@ public class AutoWebModule extends LoopholeListenerModule implements PersistentS
             return;
         }
 
-        if (!isRightClickActivation()) {
+        if (!isRightClickActivation() && immediateFirstUse.getVal()) {
             queueUseClick();
         }
         if (shouldContinueUsingSession()) {
-            scheduleNextUse(activeSession.token());
+            scheduleFirstRepeatedUse(activeSession.token());
         }
     }
 
@@ -225,18 +242,29 @@ public class AutoWebModule extends LoopholeListenerModule implements PersistentS
         return -1;
     }
 
+    private long getRandomizedStartDelayMs() {
+        return Math.max(0L, Math.round(startDelay.getRandomizedValue() * 1000.0));
+    }
+
     private long getRandomizedDelayMs() {
         return Math.max(0L, Math.round(useDelay.getRandomizedValue() * 1000.0));
     }
 
+    private void scheduleFirstRepeatedUse(int sessionToken) {
+        scheduleUse(sessionToken, getRandomizedStartDelayMs() + getRandomizedDelayMs());
+    }
+
     private void scheduleNextUse(int sessionToken) {
+        scheduleUse(sessionToken, getRandomizedDelayMs());
+    }
+
+    private void scheduleUse(int sessionToken, long delayMs) {
         if (!isSessionValid(sessionToken)) {
             return;
         }
 
         int useToken = ++scheduledUseToken;
         useTaskScheduled = true;
-        long delayMs = getRandomizedDelayMs();
         system.scheduler.runDelayedTask(() -> mc.execute(() -> tryQueueUse(sessionToken, useToken)), delayMs);
     }
 
@@ -357,6 +385,7 @@ public class AutoWebModule extends LoopholeListenerModule implements PersistentS
     }
 
     private void configureChildSettings() {
+        activationButton.setChangeAction(setting -> scheduleChildSettingsSync());
         switchBack.setChangeAction(setting -> scheduleChildSettingsSync());
     }
 
@@ -364,6 +393,10 @@ public class AutoWebModule extends LoopholeListenerModule implements PersistentS
         List<ModuleSetting<?>> settings = scGeneral.getSettings();
         settings.clear();
         settings.add(activationButton);
+        settings.add(startDelay);
+        if (!isRightClickActivation()) {
+            settings.add(immediateFirstUse);
+        }
         settings.add(useDelay);
         settings.add(switchBack);
         if (switchBack.getVal()) {
@@ -400,7 +433,7 @@ public class AutoWebModule extends LoopholeListenerModule implements PersistentS
 
     @Override
     public Collection<ModuleSetting<?>> getPersistentSettings() {
-        return List.of(cancelSwitchBackOnManualSlotChange);
+        return List.of(immediateFirstUse, cancelSwitchBackOnManualSlotChange);
     }
 
     private static final class ActiveSession {

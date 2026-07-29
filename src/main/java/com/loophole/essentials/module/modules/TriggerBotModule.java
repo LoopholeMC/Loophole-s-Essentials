@@ -106,6 +106,23 @@ public class TriggerBotModule extends LoopholeListenerModule implements Persiste
             .build()
     );
 
+    public final ModuleSetting<Boolean> opponentAngleCheck = scSprintReset.add(createBoolSetting()
+            .name("opponent-angle-check")
+            .description("Only allow W-Tap or S-Tap activation while the opponent is facing you within the configured angle threshold.")
+            .def(false)
+            .build()
+    );
+
+    public final ModuleSetting<Double> opponentAngleThreshold = scSprintReset.add(createDoubleSetting()
+            .name("opponent-angle-threshold")
+            .description("Maximum allowed opponent facing angle in degrees for W-Tap or S-Tap activation. Default 90 means <= 90 passes.")
+            .def(90.0)
+            .min(0.0)
+            .max(180.0)
+            .decimalPlaces(1)
+            .build()
+    );
+
     public final RangeDoubleSetting tapDuration = scSprintReset.add(createRangeDoubleSetting()
             .name("tap-duration")
             .description("Randomized tap duration in milliseconds used after qualifying grounded hits or optional humanized misses.")
@@ -352,6 +369,10 @@ public class TriggerBotModule extends LoopholeListenerModule implements Persiste
         }
 
         pendingAction = next;
+        if (next.kind() == PendingActionKind.REAL_ATTACK && next.readyAtMs() <= nowMs) {
+            finalizePendingAction(next.token());
+            return;
+        }
         processPendingAction(nowMs);
     }
 
@@ -919,6 +940,9 @@ public class TriggerBotModule extends LoopholeListenerModule implements Persiste
         if (distance < tapDistanceWindow.getLower() || distance > tapDistanceWindow.getUpper()) {
             return false;
         }
+        if (!passesOpponentAngleCheck(target)) {
+            return false;
+        }
 
         return switch (validationMode) {
             case ENTITY_CROSSHAIR -> isDirectCrosshairTarget(target);
@@ -933,6 +957,33 @@ public class TriggerBotModule extends LoopholeListenerModule implements Persiste
                         && isCobwebTargetWithinAttackRange(tracked);
             }
         };
+    }
+
+    private boolean passesOpponentAngleCheck(Player target) {
+        return !opponentAngleCheck.getVal()
+                || getOpponentFacingAngle(target) <= opponentAngleThreshold.getVal();
+    }
+
+    private double getOpponentFacingAngle(Player target) {
+        if (target == null || mc.player == null) {
+            return 0.0;
+        }
+
+        Vec3 targetLook = target.getViewVector(1.0F);
+        Vec3 targetEye = target.getEyePosition();
+        Vec3 observerEye = mc.player.getEyePosition();
+        Vec3 horizontalLook = new Vec3(targetLook.x, 0.0, targetLook.z);
+        Vec3 horizontalToObserver = new Vec3(
+                observerEye.x - targetEye.x,
+                0.0,
+                observerEye.z - targetEye.z
+        );
+        if (horizontalLook.lengthSqr() <= 1.0E-6 || horizontalToObserver.lengthSqr() <= 1.0E-6) {
+            return 0.0;
+        }
+
+        double dot = horizontalLook.normalize().dot(horizontalToObserver.normalize());
+        return Math.toDegrees(Math.acos(Mth.clamp(dot, -1.0, 1.0)));
     }
 
     private void updateTapState(long nowMs) {
@@ -1222,6 +1273,7 @@ public class TriggerBotModule extends LoopholeListenerModule implements Persiste
     private void configureChildSettings() {
         uppercutEnabled.setChangeAction(setting -> scheduleChildSettingsSync());
         sprintResetMode.setChangeAction(setting -> scheduleChildSettingsSync());
+        opponentAngleCheck.setChangeAction(setting -> scheduleChildSettingsSync());
         attackDelayEnabled.setChangeAction(setting -> scheduleChildSettingsSync());
         humanizationEnabled.setChangeAction(setting -> scheduleChildSettingsSync());
         knockbackMisses.setChangeAction(setting -> scheduleChildSettingsSync());
@@ -1260,6 +1312,10 @@ public class TriggerBotModule extends LoopholeListenerModule implements Persiste
         settings.clear();
         settings.add(sprintResetMode);
         if (sprintResetMode.getVal() != SprintResetMode.Off) {
+            settings.add(opponentAngleCheck);
+            if (opponentAngleCheck.getVal()) {
+                settings.add(opponentAngleThreshold);
+            }
             settings.add(waitForShieldBreakFollowUpClick);
             settings.add(tapDuration);
             settings.add(tapDistanceWindow);
@@ -1337,6 +1393,8 @@ public class TriggerBotModule extends LoopholeListenerModule implements Persiste
         return List.of(
                 requireAscending,
                 uppercutDistanceWindow,
+                opponentAngleCheck,
+                opponentAngleThreshold,
                 tapDuration,
                 tapDistanceWindow,
                 waitForShieldBreakFollowUpClick,

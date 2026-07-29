@@ -2,6 +2,7 @@ package com.loophole.essentials.module.modules;
 
 import com.loophole.essentials.mixin.AccessorKeyMapping;
 import com.loophole.essentials.module.LoopholeListenerModule;
+import com.loophole.essentials.module.PersistentSettingProvider;
 import com.loophole.essentials.module.settings.MouseButtonSetting;
 import com.loophole.essentials.module.settings.RangeDoubleSetting;
 import io.github.itzispyder.clickcrystals.events.EventHandler;
@@ -11,6 +12,7 @@ import io.github.itzispyder.clickcrystals.events.events.networking.GameLeaveEven
 import io.github.itzispyder.clickcrystals.events.events.world.ClientTickStartEvent;
 import io.github.itzispyder.clickcrystals.events.listeners.UserInputListener;
 import io.github.itzispyder.clickcrystals.gui.ClickType;
+import io.github.itzispyder.clickcrystals.gui.screens.ModuleEditScreen;
 import io.github.itzispyder.clickcrystals.modules.ModuleSetting;
 import io.github.itzispyder.clickcrystals.modules.settings.SettingSection;
 import io.github.itzispyder.clickcrystals.util.minecraft.PlayerUtils;
@@ -20,9 +22,11 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import org.lwjgl.glfw.GLFW;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Locale;
 
-public class BlockSpamModule extends LoopholeListenerModule {
+public class BlockSpamModule extends LoopholeListenerModule implements PersistentSettingProvider {
 
     private final SettingSection scGeneral = getGeneralSection();
 
@@ -37,6 +41,23 @@ public class BlockSpamModule extends LoopholeListenerModule {
             .name("allowed-held-items")
             .description("Comma-separated held-item name fragments Block Spam can place with, for example planks,logs,cobblestone.")
             .def("plank,log,cobblestone")
+            .build()
+    );
+
+    public final RangeDoubleSetting startDelay = scGeneral.add(createRangeDoubleSetting()
+            .name("start-delay")
+            .description("Randomized delay after pressing the activation button before the repeating use-delay cycle starts.")
+            .def(0.000, 0.000)
+            .min(0.000)
+            .max(0.500)
+            .decimalPlaces(3)
+            .build()
+    );
+
+    public final ModuleSetting<Boolean> immediateFirstUse = scGeneral.add(createBoolSetting()
+            .name("immediate-first-use")
+            .description("Queue one immediate block placement when a non-Right-Click activation button is first pressed, then wait for the delayed repeat cycle.")
+            .def(true)
             .build()
     );
 
@@ -55,9 +76,13 @@ public class BlockSpamModule extends LoopholeListenerModule {
     private boolean activationHeld = false;
     private boolean useTaskScheduled = false;
     private boolean useLoopActive = false;
+    private boolean pendingChildSettingsSync = false;
+    private boolean pendingSettingsScreenRefresh = false;
 
     public BlockSpamModule() {
         super("block-spam", "Repeatedly places matching held blocks on highlighted block targets while the selected bind stays held.");
+        configureChildSettings();
+        syncVisibleSettings();
     }
 
     @Override
@@ -129,11 +154,11 @@ public class BlockSpamModule extends LoopholeListenerModule {
         useLoopActive = true;
         activeSequenceToken++;
         cancelScheduledUse();
-        if (!isRightClickActivation()) {
+        if (!isRightClickActivation() && immediateFirstUse.getVal()) {
             queueUseClick();
         }
         if (shouldContinueUsing()) {
-            scheduleNextUse(activeSequenceToken);
+            scheduleFirstRepeatedUse(activeSequenceToken);
         }
     }
 
@@ -187,18 +212,29 @@ public class BlockSpamModule extends LoopholeListenerModule {
         return activationButton.matchesMouse(GLFW.GLFW_MOUSE_BUTTON_RIGHT);
     }
 
+    private long getRandomizedStartDelayMs() {
+        return Math.max(0L, Math.round(startDelay.getRandomizedValue() * 1000.0));
+    }
+
     private long getRandomizedDelayMs() {
         return Math.max(0L, Math.round(useDelay.getRandomizedValue() * 1000.0));
     }
 
+    private void scheduleFirstRepeatedUse(int sequenceToken) {
+        scheduleUse(sequenceToken, getRandomizedStartDelayMs() + getRandomizedDelayMs());
+    }
+
     private void scheduleNextUse(int sequenceToken) {
+        scheduleUse(sequenceToken, getRandomizedDelayMs());
+    }
+
+    private void scheduleUse(int sequenceToken, long delayMs) {
         if (!isSequenceValid(sequenceToken)) {
             return;
         }
 
         int useToken = ++scheduledUseToken;
         useTaskScheduled = true;
-        long delayMs = getRandomizedDelayMs();
         system.scheduler.runDelayedTask(() -> mc.execute(() -> tryQueueUse(sequenceToken, useToken)), delayMs);
     }
 
@@ -299,5 +335,53 @@ public class BlockSpamModule extends LoopholeListenerModule {
             return GLFW.glfwGetMouseButton(mc.getWindow().handle(), activationButton.getButton()) == GLFW.GLFW_PRESS;
         }
         return false;
+    }
+
+    private void configureChildSettings() {
+        activationButton.setChangeAction(setting -> scheduleChildSettingsSync());
+    }
+
+    private void syncVisibleSettings() {
+        List<ModuleSetting<?>> settings = scGeneral.getSettings();
+        settings.clear();
+        settings.add(activationButton);
+        settings.add(allowedHeldItems);
+        settings.add(startDelay);
+        if (!isRightClickActivation()) {
+            settings.add(immediateFirstUse);
+        }
+        settings.add(useDelay);
+    }
+
+    private void refreshSettingsScreen() {
+        if (pendingSettingsScreenRefresh) {
+            return;
+        }
+
+        pendingSettingsScreenRefresh = true;
+        system.scheduler.runDelayedTask(() -> mc.execute(() -> {
+            pendingSettingsScreenRefresh = false;
+            if (mc.screen instanceof ModuleEditScreen screen && screen.getModule() == this) {
+                mc.setScreen(new ModuleEditScreen(this));
+            }
+        }), 1L);
+    }
+
+    private void scheduleChildSettingsSync() {
+        if (pendingChildSettingsSync) {
+            return;
+        }
+
+        pendingChildSettingsSync = true;
+        system.scheduler.runDelayedTask(() -> mc.execute(() -> {
+            pendingChildSettingsSync = false;
+            syncVisibleSettings();
+            refreshSettingsScreen();
+        }), 1L);
+    }
+
+    @Override
+    public Collection<ModuleSetting<?>> getPersistentSettings() {
+        return List.of(immediateFirstUse);
     }
 }

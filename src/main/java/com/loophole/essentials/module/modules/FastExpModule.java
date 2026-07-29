@@ -12,6 +12,16 @@ import net.minecraft.world.item.Items;
 
 public class FastExpModule extends LoopholeListenerModule {
 
+    private final RangeDoubleSetting startDelay = getGeneralSection().add(createRangeDoubleSetting()
+            .name("start-delay")
+            .description("Randomized delay after pressing Right Click before the repeating use-delay cycle starts.")
+            .def(0.000, 0.000)
+            .min(0.000)
+            .max(0.100)
+            .decimalPlaces(3)
+            .build()
+    );
+
     private final RangeDoubleSetting useDelay = getGeneralSection().add(createRangeDoubleSetting()
             .name("use-delay")
             .description("Randomized delay between queued experience-bottle uses while the use key stays held.")
@@ -24,6 +34,7 @@ public class FastExpModule extends LoopholeListenerModule {
 
     private int scheduledUseToken = 0;
     private boolean useTaskScheduled = false;
+    private boolean useLoopActive = false;
 
     public FastExpModule() {
         super("fast-exp", "Uses experience bottles quickly while holding right-click.");
@@ -46,6 +57,11 @@ public class FastExpModule extends LoopholeListenerModule {
             resetRuntimeState();
             return;
         }
+        if (!useLoopActive) {
+            useLoopActive = true;
+            scheduleFirstRepeatedUse();
+            return;
+        }
         if (!useTaskScheduled) {
             scheduleNextUse();
         }
@@ -66,14 +82,25 @@ public class FastExpModule extends LoopholeListenerModule {
                 && mc.screen == null;
     }
 
+    private long getRandomizedStartDelayMs() {
+        return Math.max(0L, Math.round(startDelay.getRandomizedValue() * 1000.0));
+    }
+
     private long getRandomizedDelayMs() {
         return Math.max(0L, Math.round(useDelay.getRandomizedValue() * 1000.0));
     }
 
+    private void scheduleFirstRepeatedUse() {
+        scheduleUse(getRandomizedStartDelayMs() + getRandomizedDelayMs());
+    }
+
     private void scheduleNextUse() {
+        scheduleUse(getRandomizedDelayMs());
+    }
+
+    private void scheduleUse(long delayMs) {
         int useToken = ++scheduledUseToken;
         useTaskScheduled = true;
-        long delayMs = getRandomizedDelayMs();
         system.scheduler.runDelayedTask(() -> mc.execute(() -> tryQueueUse(useToken)), delayMs);
     }
 
@@ -106,6 +133,7 @@ public class FastExpModule extends LoopholeListenerModule {
 
     private void resetRuntimeState() {
         useTaskScheduled = false;
+        useLoopActive = false;
         scheduledUseToken++;
     }
 }
